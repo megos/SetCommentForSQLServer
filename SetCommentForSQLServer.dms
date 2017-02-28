@@ -1,0 +1,134 @@
+﻿// SetCommentForSQLServer
+
+
+class MainForm extends VCLForm {
+  
+  var path = WScript.Path + 'scripts\Tool\';
+  
+  function MainForm(main, setting) {
+
+    this.loadFromFile(new File(this.path + 'SetCommentForSQLServer.dfm'));
+    this.main = main;
+
+    // 設定読み込み
+    fromSetting(setting);
+  }
+
+  // フォーム上の設定値をSettingから設定
+  function fromSetting(setting) {
+    this.left = setting.windowLeft;
+    this.top = setting.windowTop;
+    this.cboLP.Checked = setting.isLP;
+    this.cboPL.Checked = setting.isPL;
+  }
+  
+  // フォーム上の設定値をSettingにコンバート  
+  function toSetting() {
+    var setting = new Setting();
+    setting.windowLeft = this.left;
+    setting.windowTop = this.top;
+    setting.isLP = this.cboLP.Checked;
+    setting.isPL = this.cboPL.Checked;
+    return setting;
+  }
+
+}
+
+class Setting {
+
+  var path = WScript.Path + 'scripts\Tool\';
+
+  var windowLeft;
+  var windowTop;
+  var isLP;
+  
+  function loadSetting() {
+    // iniファイル読み込み
+    var ini = new Ini(new File(this.path + 'SetCommentForSQLServer.ini'));
+    this.windowLeft = ini.read('Window','Left',100);
+    this.windowTop = ini.read('Window','Top',100);
+    this.isLP = ini.read('SetCommentForSQLServer','LP', true);
+    this.isPL = ini.read('SetCommentForSQLServer','PL', false);
+    return this;
+  }
+  
+  function saveSetting() {
+    var ini = new Ini(new File(this.path + 'SetCommentForSQLServer.ini'));
+    ini.write('Window','Left',this.windowLeft);
+    ini.write('Window','Top',this.windowTop);
+    ini.write('SetCommentForSQLServer','LP', this.isLP);
+    ini.write('SetCommentForSQLServer','PL', this.isPL);
+    ini.update(); // iniファイル更新
+  }
+}
+
+
+class Generator() {
+  
+  function process() {
+    var setting = new Setting().loadSetting();
+    var frm = new MainForm(true,setting);
+    if (frm.showModal() === 1) {
+      // 出力ボタンが押されてfrmを閉じたなら、設定を保存し出力する
+      setting = frm.toSetting();
+      setting.saveSetting();
+      if (!(frm.txtTables.Text.Length === 0 || frm.txtSource.Text.Length === 0)) {
+        addComment(frm.txtTables.Text, frm.txtSource.Text, frm.cboLP.Checked);
+      } else {
+        alert('入力がありません');
+      }
+    }
+  }
+
+  function addComment(table, text, checked) {
+    // DBに接続
+    var conn = application.dbTree.getSelectedDatabaseConnection();
+    var row = text.split(/\r\n|\r|\n/);
+    var result = '';
+
+    var idxP = 1;
+    var idxL = 0;
+
+    if (!checked) {
+      idxP = 0;
+      idxL = 1;
+    }
+
+    for (var i = 0; i < row.length; i++) {
+      var data = row[i].split(/,|\t/);
+      if (data.length == 2) {
+        var rs = conn.executeQuery("select name from fn_listextendedproperty(NULL, 'schema', 'dbo', 'table', '" + table + "', 'column', '" + data[0].trim() + "')");
+          
+        if (rs.eof() == false) {
+          if (rs.getFieldValue('name') == 'MS_Description') {
+            conn.execute("exec sys.sp_updateextendedproperty @name=N'MS_Description'" +
+                                                           ",@value=N'" + data[idxL].trim() + "'" +
+                                                           ",@level0type=N'SCHEMA'" +
+                                                           ",@level0name=N'dbo'" +
+                                                           ",@level1type=N'TABLE'" +
+                                                           ",@level1name=N'" + table + "'" +
+                                                           ",@level2type=N'COLUMN'" +
+                                                           ",@level2name=N'" + data[idxP].trim() + "'");
+          }
+        } else {
+          conn.execute("exec sys.sp_addextendedproperty @name=N'MS_Description'" +
+                                                      ",@value=N'" + data[idxL].trim() + "'" +
+                                                      ",@level0type=N'SCHEMA'" +
+                                                      ",@level0name=N'dbo'" +
+                                                      ",@level1type=N'TABLE'" +
+                                                      ",@level1name=N'" + table + "'" +
+                                                      ",@level2type=N'COLUMN'" +
+                                                      ",@level2name=N'" + data[idxP].trim() + "'"); 
+        }    
+        rs.close();
+      }
+
+    }
+    alert('コメントが反映されました');
+  }
+  
+}
+
+(function(){
+  new Generator().process();
+})();
